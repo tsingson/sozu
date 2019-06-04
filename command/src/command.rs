@@ -139,19 +139,20 @@ mod tests {
   use crate::certificate::split_certificate_chain;
   use crate::proxy::{Application,CertificateAndKey,CertFingerprint,ProxyRequestData,HttpFront,Backend,
     AppMetricsData,MetricsData,FilteredData,Percentiles,RemoveBackend,
-    AddCertificate,RemoveCertificate,LoadBalancingParams,TlsVersion};
+    AddCertificate,RemoveCertificate,LoadBalancingParams,TlsVersion,RulePosition,PathRule};
   use crate::config::{LoadBalancingAlgorithms,ProxyProtocolConfig};
 
   #[test]
   fn config_message_test() {
-    let raw_json = r#"{ "id": "ID_TEST", "version": 0, "type": "PROXY", "data":{"type": "ADD_HTTP_FRONT", "data": {"app_id": "xxx", "hostname": "yyy", "path_begin": "xxx", "address": "0.0.0.0:8080"}} }"#;
+    let raw_json = r#"{ "id": "ID_TEST", "version": 0, "type": "PROXY", "data":{"type": "ADD_HTTP_FRONT", "data": {"app_id": "xxx", "hostname": "yyy", "path": {"PREFIX": "xxx"}, "address": "0.0.0.0:8080"}} }"#;
     let message: CommandRequest = serde_json::from_str(raw_json).unwrap();
     println!("{:?}", message);
     assert_eq!(message.data, CommandRequestData::Proxy(ProxyRequestData::AddHttpFront(HttpFront{
       app_id: String::from("xxx"),
       hostname: String::from("yyy"),
-      path_begin: String::from("xxx"),
+      path: PathRule::Prefix(String::from("xxx")),
       address: "0.0.0.0:8080".parse().unwrap(),
+      position: RulePosition::Tree,
     })));
   }
 
@@ -216,8 +217,9 @@ mod tests {
       data:     CommandRequestData::Proxy(ProxyRequestData::AddHttpFront(HttpFront{
                   app_id: String::from("xxx"),
                   hostname: String::from("yyy"),
-                  path_begin: String::from("xxx"),
+                  path: PathRule::Prefix(String::from("xxx")),
                   address: "0.0.0.0:8080".parse().unwrap(),
+                  position: RulePosition::Tree,
       })),
       worker_id: None
     });
@@ -228,8 +230,9 @@ mod tests {
       data:     CommandRequestData::Proxy(ProxyRequestData::RemoveHttpFront(HttpFront{
                   app_id: String::from("xxx"),
                   hostname: String::from("yyy"),
-                  path_begin: String::from("xxx"),
+                  path: PathRule::Prefix(String::from("xxx")),
                   address: "0.0.0.0:8080".parse().unwrap(),
+                  position: RulePosition::Tree,
       })),
       worker_id: None
     });
@@ -240,8 +243,9 @@ mod tests {
       data:     CommandRequestData::Proxy(ProxyRequestData::AddHttpsFront(HttpFront{
                   app_id: String::from("xxx"),
                   hostname: String::from("yyy"),
-                  path_begin: String::from("xxx"),
+                  path: PathRule::Prefix(String::from("xxx")),
                   address: "0.0.0.0:8443".parse().unwrap(),
+                  position: RulePosition::Tree,
       })),
       worker_id: None
     });
@@ -252,8 +256,9 @@ mod tests {
       data:     CommandRequestData::Proxy(ProxyRequestData::RemoveHttpsFront(HttpFront{
                   app_id: String::from("xxx"),
                   hostname: String::from("yyy"),
-                  path_begin: String::from("xxx"),
+                  path: PathRule::Prefix(String::from("xxx")),
                   address: "0.0.0.0:8443".parse().unwrap(),
+                  position: RulePosition::Tree,
       })),
       worker_id: None
     });
