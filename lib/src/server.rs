@@ -199,7 +199,7 @@ impl Server {
     config_state: Option<ConfigState>,
     expects_initial_status: bool) -> Self {
 
-    FEATURES.with(|features| {
+    FEATURES.with(|_features| {
       // initializing feature flags
     });
 

@@ -341,7 +341,7 @@ impl<Front:SocketHandler> Http<Front> {
   }
 
   fn must_continue_request(&self) -> bool {
-    if let Some(Continue::Expects(sz)) = self.request.as_ref().and_then(|r| r.get_keep_alive().as_ref().map(|conn| conn.continues)) {
+    if let Some(Continue::Expects(_)) = self.request.as_ref().and_then(|r| r.get_keep_alive().as_ref().map(|conn| conn.continues)) {
       true
     } else {
       false
@@ -1669,11 +1669,10 @@ impl AddedRequestHeader {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  /*
   #[test]
   #[cfg(target_pointer_width = "64")]
   fn size_test() {
@@ -1688,5 +1687,5 @@ mod tests {
     assert_size!(Option<ResponseState>, 256);
     assert_size!(Option<AddedRequestHeader>, 88);
   }
-  */
 }
+*/
