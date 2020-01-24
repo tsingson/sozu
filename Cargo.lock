@@ -229,9 +229,9 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
 name = "cookie-factory"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41f21b581d2f0cb891554812435667bb9610d74feb1a4c6415bf09c28ff0381d"
+checksum = "396de984970346b0d9e93d1415082923c679e5ae5c3ee3dcbd104f5610af126b"
 
 [[package]]
 name = "crc32fast"
@@ -630,13 +630,13 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "lexical-core"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db65c6da02e61f55dae90a0ae427b2a5f6b3e8db09f58d10efab23af92592616"
+checksum = "21f866863575d0e1d654fbeeabdc927292fdf862873dc3c96c6f753357e13374"
 dependencies = [
  "arrayvec",
  "bitflags",
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "ryu",
  "static_assertions",
 ]
@@ -807,7 +807,7 @@ checksum = "ffb4262d26ed83a1c0a33a38fe2bb15797329c85770da05e6b828ddb782627af"
 dependencies = [
  "lexical-core",
  "memchr",
- "version_check 0.9.2",
+ "version_check 0.9.3",
 ]
 
 [[package]]
@@ -1337,8 +1337,9 @@ dependencies = [
 name = "sozu"
 version = "0.11.59"
 dependencies = [
- "clap",
+ "chrono",
  "futures",
+ "hex",
  "jemallocator",
  "lazy_static",
  "libc",
@@ -1347,6 +1348,7 @@ dependencies = [
  "nix",
  "nom 4.2.3",
  "num_cpus",
+ "prettytable-rs",
  "rand 0.7.3",
  "regex",
  "serde",
@@ -1355,6 +1357,8 @@ dependencies = [
  "slab 0.3.0",
  "sozu-command-lib",
  "sozu-lib",
+ "structopt",
+ "structopt-derive 0.3.5",
  "tempfile",
  "time 0.1.43",
 ]
@@ -1430,21 +1434,6 @@ dependencies = [
  "url 2.2.1",
  "uuid",
  "webpki",
-]
-
-[[package]]
-name = "sozuctl"
-version = "0.11.59"
-dependencies = [
- "hex",
- "prettytable-rs",
- "rand 0.7.3",
- "serde",
- "serde_derive",
- "serde_json",
- "sozu-command-lib",
- "structopt",
- "structopt-derive 0.3.5",
 ]
 
 [[package]]
