@@ -2,12 +2,13 @@ use sozu_command::config::{Config, ProxyProtocolConfig, LoadBalancingAlgorithms,
 use sozu_command::channel::Channel;
 use sozu_command::certificate::{calculate_fingerprint,split_certificate_chain};
 use sozu_command::command::{CommandResponseData,CommandRequestData,CommandRequest,CommandResponse,CommandStatus,RunState,WorkerInfo};
-use sozu_command::proxy::{Application, ProxyRequestData, Backend, HttpFront, TcpFront,
-  CertificateAndKey, CertFingerprint, Query, QueryAnswer, QueryApplicationType, QueryApplicationDomain,
-  FilteredData,
-  AddCertificate, RemoveCertificate, ReplaceCertificate, LoadBalancingParams, RemoveBackend, TcpListener, ListenerType,
-  TlsVersion, QueryCertificateType, QueryAnswerCertificate, RemoveListener, ActivateListener, DeactivateListener,
-  PathRule, RulePosition};
+use sozu_command::proxy::{Application, ProxyRequestData, Backend, HttpFront,
+  TcpFront, CertificateAndKey, CertFingerprint, Query, QueryAnswer,
+  QueryApplicationType, QueryApplicationDomain, FilteredData, AddCertificate,
+  RemoveCertificate, ReplaceCertificate, LoadBalancingParams, RemoveBackend,
+  TcpListener, ListenerType, TlsVersion, QueryCertificateType,
+  QueryAnswerCertificate, RemoveListener, ActivateListener, DeactivateListener,
+  PathRule, RulePosition, Route};
 
 use serde_json;
 use std::collections::{HashMap,HashSet,BTreeMap};
@@ -1029,11 +1030,12 @@ pub fn remove_application(channel: Channel<CommandRequest,CommandResponse>, time
   order_command(channel, timeout, ProxyRequestData::RemoveApplication(String::from(app_id)));
 }
 
-pub fn add_http_frontend(channel: Channel<CommandRequest,CommandResponse>, timeout: u64, app_id: &str,
-  address: SocketAddr, hostname: &str, path: &str, https: bool) {
+pub fn add_http_frontend(channel: Channel<CommandRequest,CommandResponse>,
+  timeout: u64, route: Route, address: SocketAddr, hostname: &str, path: &str,
+  https: bool) {
   if https {
     order_command(channel, timeout, ProxyRequestData::AddHttpsFront(HttpFront {
-      app_id: String::from(app_id),
+      route,
       address,
       hostname: String::from(hostname),
       path: PathRule::Prefix(String::from(path)),
@@ -1041,7 +1043,7 @@ pub fn add_http_frontend(channel: Channel<CommandRequest,CommandResponse>, timeo
     }));
   } else {
     order_command(channel, timeout, ProxyRequestData::AddHttpFront(HttpFront {
-      app_id: String::from(app_id),
+      route,
       address,
       hostname: String::from(hostname),
       path: PathRule::Prefix(String::from(path)),
@@ -1050,11 +1052,12 @@ pub fn add_http_frontend(channel: Channel<CommandRequest,CommandResponse>, timeo
   }
 }
 
-pub fn remove_http_frontend(channel: Channel<CommandRequest,CommandResponse>, timeout: u64, app_id: &str,
-  address: SocketAddr, hostname: &str, path: &str, https: bool) {
+pub fn remove_http_frontend(channel: Channel<CommandRequest,CommandResponse>,
+  timeout: u64, route: Route, address: SocketAddr, hostname: &str, path: &str,
+  https: bool) {
   if https {
     order_command(channel, timeout, ProxyRequestData::RemoveHttpsFront(HttpFront {
-      app_id: String::from(app_id),
+      route,
       address,
       hostname: String::from(hostname),
       path: PathRule::Prefix(String::from(path)),
@@ -1062,7 +1065,7 @@ pub fn remove_http_frontend(channel: Channel<CommandRequest,CommandResponse>, ti
     }));
   } else {
     order_command(channel, timeout, ProxyRequestData::RemoveHttpFront(HttpFront {
-      app_id: String::from(app_id),
+      route,
       address,
       hostname: String::from(hostname),
       path: PathRule::Prefix(String::from(path)),
@@ -1405,7 +1408,10 @@ pub fn query_application(mut channel: Channel<CommandRequest,CommandResponse>, j
 
               for (ref key, ref values) in frontend_data.iter() {
                 let mut row = Vec::new();
-                row.push(cell!(key.app_id));
+                match &key.route {
+                  Route::AppId(app_id) => row.push(cell!(app_id)),
+                  Route::Deny => row.push(cell!("-")),
+                }
                 row.push(cell!(key.hostname));
                 row.push(cell!(key.path));
 
@@ -1426,7 +1432,10 @@ pub fn query_application(mut channel: Channel<CommandRequest,CommandResponse>, j
 
               for (ref key, ref values) in https_frontend_data.iter() {
                 let mut row = Vec::new();
-                row.push(cell!(key.app_id));
+                match &key.route {
+                  Route::AppId(app_id) => row.push(cell!(app_id)),
+                  Route::Deny => row.push(cell!("-")),
+                }
                 row.push(cell!(key.hostname));
                 row.push(cell!(key.path));
 
