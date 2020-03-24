@@ -137,7 +137,7 @@ mod tests {
   use serde_json;
   use hex::FromHex;
   use crate::certificate::split_certificate_chain;
-  use crate::proxy::{Application,CertificateAndKey,CertFingerprint,ProxyRequestData,HttpFront,Backend,
+  use crate::proxy::{Application,CertificateAndKey,CertFingerprint,ProxyRequestData,HttpFrontend,Backend,
     AppMetricsData,MetricsData,FilteredData,Percentiles,RemoveBackend,
     AddCertificate,RemoveCertificate,LoadBalancingParams,TlsVersion,RulePosition,PathRule,
     Route};
@@ -145,10 +145,10 @@ mod tests {
 
   #[test]
   fn config_message_test() {
-    let raw_json = r#"{ "id": "ID_TEST", "version": 0, "type": "PROXY", "data":{"type": "ADD_HTTP_FRONT", "data": { "route": {"APP_ID": "xxx"}, "hostname": "yyy", "path": {"PREFIX": "xxx"}, "address": "0.0.0.0:8080"}} }"#;
+    let raw_json = r#"{ "id": "ID_TEST", "version": 0, "type": "PROXY", "data":{"type": "ADD_HTTP_FRONTEND", "data": { "route": {"APP_ID": "xxx"}, "hostname": "yyy", "path": {"PREFIX": "xxx"}, "address": "0.0.0.0:8080"}} }"#;
     let message: CommandRequest = serde_json::from_str(raw_json).unwrap();
     println!("{:?}", message);
-    assert_eq!(message.data, CommandRequestData::Proxy(ProxyRequestData::AddHttpFront(HttpFront{
+    assert_eq!(message.data, CommandRequestData::Proxy(ProxyRequestData::AddHttpFrontend(HttpFrontend{
       route: Route::AppId(String::from("xxx")),
       hostname: String::from("yyy"),
       path: PathRule::Prefix(String::from("xxx")),
@@ -215,7 +215,7 @@ mod tests {
   test_message!(add_http_front, "../assets/add_http_front.json", CommandRequest {
       id:       "ID_TEST".to_string(),
       version:  0,
-      data:     CommandRequestData::Proxy(ProxyRequestData::AddHttpFront(HttpFront{
+      data:     CommandRequestData::Proxy(ProxyRequestData::AddHttpFrontend(HttpFrontend{
                   route: Route::AppId(String::from("xxx")),
                   hostname: String::from("yyy"),
                   path: PathRule::Prefix(String::from("xxx")),
@@ -228,7 +228,7 @@ mod tests {
   test_message!(remove_http_front, "../assets/remove_http_front.json", CommandRequest {
       id:       "ID_TEST".to_string(),
       version:  0,
-      data:     CommandRequestData::Proxy(ProxyRequestData::RemoveHttpFront(HttpFront{
+      data:     CommandRequestData::Proxy(ProxyRequestData::RemoveHttpFrontend(HttpFrontend{
                   route: Route::AppId(String::from("xxx")),
                   hostname: String::from("yyy"),
                   path: PathRule::Prefix(String::from("xxx")),
@@ -241,7 +241,7 @@ mod tests {
   test_message!(add_https_front, "../assets/add_https_front.json", CommandRequest {
       id:       "ID_TEST".to_string(),
       version:  0,
-      data:     CommandRequestData::Proxy(ProxyRequestData::AddHttpsFront(HttpFront{
+      data:     CommandRequestData::Proxy(ProxyRequestData::AddHttpsFrontend(HttpFrontend{
                   route: Route::AppId(String::from("xxx")),
                   hostname: String::from("yyy"),
                   path: PathRule::Prefix(String::from("xxx")),
@@ -254,7 +254,7 @@ mod tests {
   test_message!(remove_https_front, "../assets/remove_https_front.json", CommandRequest {
       id:       "ID_TEST".to_string(),
       version:  0,
-      data:     CommandRequestData::Proxy(ProxyRequestData::RemoveHttpsFront(HttpFront{
+      data:     CommandRequestData::Proxy(ProxyRequestData::RemoveHttpsFrontend(HttpFrontend{
                   route: Route::AppId(String::from("xxx")),
                   hostname: String::from("yyy"),
                   path: PathRule::Prefix(String::from("xxx")),
