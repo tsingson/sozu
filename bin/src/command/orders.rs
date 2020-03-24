@@ -332,7 +332,7 @@ impl CommandServer {
 
         self.backends_count = self.state.count_backends();
         self.frontends_count = self.state.count_frontends();
-        gauge!("configuration.applications", self.state.applications.len());
+        gauge!("configuration.clusters", self.state.clusters.len());
         gauge!("configuration.backends", self.backends_count);
         gauge!("configuration.frontends", self.frontends_count);
     }
@@ -805,7 +805,7 @@ impl CommandServer {
 
         self.backends_count = self.state.count_backends();
         self.frontends_count = self.state.count_frontends();
-        gauge!("configuration.applications", self.state.applications.len());
+        gauge!("configuration.clusters", self.state.clusters.len());
         gauge!("configuration.backends", self.backends_count);
         gauge!("configuration.frontends", self.frontends_count);
 
@@ -907,12 +907,12 @@ impl CommandServer {
             }
             &Query::Applications(ref query_type) => {
                 main_query_answer = Some(QueryAnswer::Applications(match query_type {
-                    QueryApplicationType::AppId(ref app_id) => {
-                        vec![self.state.application_state(app_id)]
+                    QueryApplicationType::ClusterId(ref cluster_id) => {
+                        vec![self.state.application_state(cluster_id)]
                     }
                     QueryApplicationType::Domain(ref domain) => {
-                        let app_ids = get_application_ids_by_domain(&self.state, domain.hostname.clone(), domain.path.clone());
-                        app_ids.iter().map(|ref app_id| self.state.application_state(app_id)).collect()
+                        let cluster_ids = get_application_ids_by_domain(&self.state, domain.hostname.clone(), domain.path.clone());
+                        cluster_ids.iter().map(|ref cluster_id| self.state.application_state(cluster_id)).collect()
                     }
                 }));
             }
@@ -1030,8 +1030,8 @@ impl CommandServer {
                 match order {
                     ProxyRequestData::RemoveBackend(ref backend) => {
                         let msg = format!(
-                            "No such backend {} at {} for the application {}",
-                            backend.backend_id, backend.address, backend.app_id
+                            "No such backend {} at {} for the cluster {}",
+                            backend.backend_id, backend.address, backend.cluster_id
                         );
                         error!("{}", msg);
                         self.answer_error(client_id, request_id, msg, None);
@@ -1048,7 +1048,7 @@ impl CommandServer {
                         ..
                     }) => {
                         let msg = match route {
-                            Route::AppId(app_id) => format!("No such frontend at {} for the application {}", address, app_id),
+                            Route::ClusterId(cluster_id) => format!("No such frontend at {} for the cluster {}", address, cluster_id),
                             Route::Deny => format!("No such frontend at {}", address),
                         };
                         error!("{}", msg);
@@ -1056,12 +1056,12 @@ impl CommandServer {
                         return;
                     }
                     ProxyRequestData::RemoveTcpFrontend(TcpFrontend {
-                        ref app_id,
+                        ref cluster_id,
                         ref address,
                     }) => {
                         let msg = format!(
-                            "No such frontend at {} for the application {}",
-                            address, app_id
+                            "No such frontend at {} for the cluster {}",
+                            address, cluster_id
                         );
                         error!("{}", msg);
                         self.answer_error(client_id, request_id, msg, None).await;
@@ -1208,7 +1208,7 @@ impl CommandServer {
             _ => {}
         };
 
-        gauge!("configuration.applications", self.state.applications.len());
+        gauge!("configuration.clusters", self.state.clusters.len());
         gauge!("configuration.backends", self.backends_count);
         gauge!("configuration.frontends", self.frontends_count);
     }

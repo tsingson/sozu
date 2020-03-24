@@ -341,7 +341,7 @@ impl CommandServer {
 
         self.backends_count = self.state.count_backends();
         self.frontends_count = self.state.count_frontends();
-        gauge!("configuration.applications", self.state.applications.len());
+        gauge!("configuration.clusters", self.state.clusters.len());
         gauge!("configuration.backends", self.backends_count);
         gauge!("configuration.frontends", self.frontends_count);
     }
@@ -560,7 +560,7 @@ pub fn start(
                 .load_state(None, "INITIALIZATION".to_string(), &path)
                 .await;
         }
-        gauge!("configuration.applications", server.state.applications.len());
+        gauge!("configuration.clusters", server.state.clusters.len());
         gauge!("configuration.backends", server.backends_count);
         gauge!("configuration.frontends", server.frontends_count);
 
