@@ -703,9 +703,9 @@ impl Server {
         ProxyRequest { ref id, order: ProxyRequestData::ActivateListener(ref activate) } => {
           if activate.proxy == ListenerType::HTTP {
             debug!("{} activate http listener {:?}", id, activate);
-            let listener = self.scm_listeners.as_mut().and_then(|s| s.get_http(&activate.front))
+            let listener = self.scm_listeners.as_mut().and_then(|s| s.get_http(&activate.address))
               .map(|fd| unsafe { TcpListener::from_raw_fd(fd) });
-            let status = match self.http.activate_listener(&mut self.poll, &activate.front, listener) {
+            let status = match self.http.activate_listener(&mut self.poll, &activate.address, listener) {
               Some(token) => {
                 self.accept(ListenToken(token.0), Protocol::HTTPListen);
                 ProxyResponseStatus::Ok
@@ -723,7 +723,7 @@ impl Server {
         ProxyRequest { ref id, order: ProxyRequestData::DeactivateListener(ref deactivate) } => {
           if deactivate.proxy == ListenerType::HTTP {
             debug!("{} deactivate http listener {:?}", id, deactivate);
-            let status = match self.http.give_back_listener(deactivate.front) {
+            let status = match self.http.give_back_listener(deactivate.address) {
               Some((token, mut listener)) => {
                   if let Err(e) = self.poll.registry().deregister(&mut listener) {
                       error!("error deregistering HTTP listen socket({:?}): {:?}", deactivate, e);
@@ -736,7 +736,7 @@ impl Server {
                   if deactivate.to_scm {
                       self.scm.set_blocking(false);
                       let listeners = Listeners {
-                          http: vec![(deactivate.front, listener.as_raw_fd())],
+                          http: vec![(deactivate.address, listener.as_raw_fd())],
                           tls:  vec![],
                           tcp:  vec![],
                       };
@@ -750,9 +750,9 @@ impl Server {
                   ProxyResponseStatus::Ok
               },
               None => {
-                error!("Couldn't deactivate HTTP listener at address {:?}", deactivate.front);
+                error!("Couldn't deactivate HTTP listener at address {:?}", deactivate.address);
                 ProxyResponseStatus::Error(
-                    format!("cannot deactivate HTTP listener at address {:?}", deactivate.front))
+                    format!("cannot deactivate HTTP listener at address {:?}", deactivate.address))
               },
             };
 
@@ -816,9 +816,9 @@ impl Server {
         ProxyRequest { ref id, order: ProxyRequestData::ActivateListener(ref activate) } => {
           if activate.proxy == ListenerType::HTTPS {
             debug!("{} activate https listener {:?}", id, activate);
-            let listener = self.scm_listeners.as_mut().and_then(|s| s.get_https(&activate.front))
+            let listener = self.scm_listeners.as_mut().and_then(|s| s.get_https(&activate.address))
               .map(|fd| unsafe { TcpListener::from_raw_fd(fd) });
-            let status = match self.https.activate_listener(&mut self.poll, &activate.front, listener) {
+            let status = match self.https.activate_listener(&mut self.poll, &activate.address, listener) {
               Some(token) => {
                 self.accept(ListenToken(token.0), Protocol::HTTPSListen);
                 ProxyResponseStatus::Ok
@@ -836,7 +836,7 @@ impl Server {
         ProxyRequest { ref id, order: ProxyRequestData::DeactivateListener(ref deactivate) } => {
           if deactivate.proxy == ListenerType::HTTPS {
             debug!("{} deactivate https listener {:?}", id, deactivate);
-            let status = match self.https.give_back_listener(deactivate.front) {
+            let status = match self.https.give_back_listener(deactivate.address) {
               Some((token, mut listener)) => {
                   if let Err(e) = self.poll.registry().deregister(&mut listener) {
                       error!("error deregistering HTTPS listen socket({:?}): {:?}", deactivate, e);
@@ -850,7 +850,7 @@ impl Server {
                       self.scm.set_blocking(false);
                       let listeners = Listeners {
                           http: vec![],
-                          tls:  vec![(deactivate.front, listener.as_raw_fd())],
+                          tls:  vec![(deactivate.address, listener.as_raw_fd())],
                           tcp:  vec![],
                       };
                       info!("sending HTTPS listener: {:?}", listeners);
@@ -863,9 +863,9 @@ impl Server {
                   ProxyResponseStatus::Ok
               },
               None => {
-                error!("Couldn't deactivate HTTPS listener at address {:?}", deactivate.front);
+                error!("Couldn't deactivate HTTPS listener at address {:?}", deactivate.address);
                 ProxyResponseStatus::Error(
-                    format!("cannot deactivate HTTPS listener at address {:?}", deactivate.front))
+                    format!("cannot deactivate HTTPS listener at address {:?}", deactivate.address))
               },
             };
 
@@ -928,9 +928,9 @@ impl Server {
         ProxyRequest { ref id, order: ProxyRequestData::ActivateListener(ref activate) } => {
           if activate.proxy == ListenerType::TCP {
             debug!("{} activate tcp listener {:?}", id, activate);
-            let listener = self.scm_listeners.as_mut().and_then(|s| s.get_tcp(&activate.front))
+            let listener = self.scm_listeners.as_mut().and_then(|s| s.get_tcp(&activate.address))
               .map(|fd| unsafe { TcpListener::from_raw_fd(fd) });
-            let status = match self.tcp.activate_listener(&mut self.poll, &activate.front, listener) {
+            let status = match self.tcp.activate_listener(&mut self.poll, &activate.address, listener) {
               Some(token) => {
                 self.accept(ListenToken(token.0), Protocol::TCPListen);
                 ProxyResponseStatus::Ok
@@ -948,7 +948,7 @@ impl Server {
         ProxyRequest { ref id, order: ProxyRequestData::DeactivateListener(ref deactivate) } => {
           if deactivate.proxy == ListenerType::TCP {
             debug!("{} deactivate tcp listener {:?}", id, deactivate);
-            let status = match self.tcp.give_back_listener(deactivate.front) {
+            let status = match self.tcp.give_back_listener(deactivate.address) {
               Some((token, mut listener)) => {
                   if let Err(e) = self.poll.registry().deregister(&mut listener) {
                       error!("error deregistering TCP listen socket({:?}): {:?}", deactivate, e);
@@ -963,7 +963,7 @@ impl Server {
                       let listeners = Listeners {
                           http: vec![],
                           tls:  vec![],
-                          tcp:  vec![(deactivate.front, listener.as_raw_fd())],
+                          tcp:  vec![(deactivate.address, listener.as_raw_fd())],
                       };
                       info!("sending TCP listener: {:?}", listeners);
                       let res = self.scm.send_listeners(&listeners);
@@ -975,9 +975,9 @@ impl Server {
                   ProxyResponseStatus::Ok
               },
               None => {
-                error!("Couldn't deactivate TCP listener at address {:?}", deactivate.front);
+                error!("Couldn't deactivate TCP listener at address {:?}", deactivate.address);
                 ProxyResponseStatus::Error(
-                    format!("cannot deactivate TCP listener at address {:?}", deactivate.front))
+                    format!("cannot deactivate TCP listener at address {:?}", deactivate.address))
               },
             };
 
