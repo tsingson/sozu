@@ -1416,6 +1416,7 @@ dependencies = [
  "hpack",
  "idna 0.2.2",
  "iovec",
+ "lazycell",
  "libc",
  "log 0.4.14",
  "memchr",
