@@ -30,7 +30,7 @@ use super::server::{Server,ProxyChannel,ListenToken,
   ListenSession, CONN_RETRIES, push_event};
 use super::socket::server_bind;
 use super::retry::RetryPolicy;
-use super::protocol::http::parser::{hostname_and_port, RequestState, Method};
+use super::protocol::http::parser::{hostname_and_port, request2::RequestState, Method};
 use router::Router;
 use util::UnwrapLog;
 use timer::TimeoutContainer;
