@@ -204,7 +204,7 @@ impl CommandServer {
                 futures::pin_mut!(f);
                 let (stream, _) =
                     match futures::future::select(accept_cancel_rx.take().unwrap(), f).await {
-                        futures::future::Either::Left((canceled, _)) => {
+                        futures::future::Either::Left((_canceled, _)) => {
                             info!("stopping listener");
                             break;
                         }
@@ -524,7 +524,7 @@ pub fn start(
                 futures::pin_mut!(f);
                 let (stream, _) =
                     match futures::future::select(accept_cancel_rx.take().unwrap(), f).await {
-                        futures::future::Either::Left((canceled, _)) => {
+                        futures::future::Either::Left((_canceled, _)) => {
                             info!("stopping listener");
                             break;
                         }
