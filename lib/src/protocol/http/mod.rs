@@ -19,10 +19,13 @@ use sozu_command::ready::Ready;
 pub mod parser;
 pub mod cookies;
 pub mod answers;
+pub mod buffer;
 
-use self::parser::{parse_request_until_stop, parse_response_until_stop,
-  RequestState, ResponseState, Chunk, Continue, RRequestLine, RStatusLine,
+use self::parser::{parse_response_until_stop,
+  ResponseState, Chunk, Continue, RRequestLine, RStatusLine,
   Method, compare_no_case};
+use self::buffer::HttpBuffer;
+use self::parser::request2::{RequestState, parse_request_until_stop};
 
 #[derive(Clone)]
 pub struct StickySession {
@@ -71,7 +74,7 @@ pub struct Http<Front:SocketHandler> {
   frontend_token:     Token,
   backend_token:      Option<Token>,
   pub status:         SessionStatus,
-  pub front_buf:      Option<BufferQueue>,
+  pub front_buf:      Option<HttpBuffer>,
   pub back_buf:       Option<BufferQueue>,
   pub cluster_id:     Option<String>,
   pub request_id:     Hyphenated,
@@ -162,7 +165,7 @@ impl<Front:SocketHandler> Http<Front> {
     self.added_res_header = self.added_response_header();
 
     // if HTTP requests are pipelined, we might still have some data in the front buffer
-    if self.front_buf.as_ref().map(|buf| !buf.empty()).unwrap_or(false) {
+    if self.front_buf.as_ref().map(|buf| !buf.buffer.empty()).unwrap_or(false) {
       self.front_readiness.event.insert(Ready::readable());
     } else {
       self.front_buf = None;
@@ -417,7 +420,7 @@ impl<Front:SocketHandler> Http<Front> {
 
   pub fn shutting_down(&mut self) -> SessionResult {
     if self.request.as_ref().map(|r| *r == RequestState::Initial).unwrap_or(false)
-      && self.front_buf.as_ref().map(|b| !b.empty()).unwrap_or(false)
+      && self.front_buf.as_ref().map(|b| !b.buffer.empty()).unwrap_or(false)
       && self.back_buf.as_ref().map(|b| !b.empty()).unwrap_or(false) {
         SessionResult::CloseSession
     } else {
@@ -607,7 +610,7 @@ impl<Front:SocketHandler> Http<Front> {
     if self.front_buf.is_none() {
       if let Some(p) = self.pool.upgrade() {
         if let Some(buf) = p.borrow_mut().checkout() {
-          self.front_buf = Some(BufferQueue::with_buffer(buf));
+          self.front_buf = Some(HttpBuffer::with_buffer(buf));
         } else {
           error!("cannot get front buffer from pool, closing");
           return SessionResult::CloseSession;
@@ -636,11 +639,11 @@ impl<Front:SocketHandler> Http<Front> {
 
       self.front_buf.as_mut().map(|front_buf| {
         front_buf.buffer.fill(sz);
-        front_buf.sliced_input(sz);
+        /*front_buf.sliced_input(sz);
         if front_buf.start_parsing_position > front_buf.parsed_position {
           let to_consume = min(front_buf.input_data_size(), front_buf.start_parsing_position - front_buf.parsed_position);
           front_buf.consume_parsed_data(to_consume);
-        }
+        }*/
       });
 
       if self.front_buf.as_ref().unwrap().buffer.available_space() == 0 {
@@ -751,7 +754,8 @@ impl<Front:SocketHandler> Http<Front> {
     self.back_readiness.interest.insert(Ready::writable());
     match self.request {
       Some(RequestState::Request(_,_,_)) | Some(RequestState::RequestWithBody(_,_,_,_)) => {
-        if ! self.front_buf.as_ref().unwrap().needs_input() {
+        //if ! self.front_buf.as_ref().unwrap().needs_input() {
+        if ! self.request.as_ref().unwrap().needs_input(self.front_buf.as_ref().unwrap().buffer.available_data()) {
           // stop reading
           self.front_readiness.interest.remove(Ready::readable());
         }
@@ -778,7 +782,8 @@ impl<Front:SocketHandler> Http<Front> {
         // requests on this connection, we can wait a bit more
         self.front_timeout.set_duration(self.frontend_timeout_duration);
 
-        if ! self.front_buf.as_ref().unwrap().needs_input() {
+        if !  self.request.as_ref().unwrap().needs_input(self.front_buf.as_ref().unwrap().buffer.available_data()) {
+
           let (request_state, header_end) = (self.request.take().unwrap(), self.req_header_end.take());
           let (request_state, header_end) = parse_request_until_stop(request_state,
             header_end, &mut self.front_buf.as_mut().unwrap(),
@@ -947,7 +952,7 @@ impl<Front:SocketHandler> Http<Front> {
       if self.front_buf.is_none() {
         if let Some(p) = self.pool.upgrade() {
           if let Some(buf) = p.borrow_mut().checkout() {
-            self.front_buf = Some(BufferQueue::with_buffer(buf));
+            self.front_buf = Some(HttpBuffer::with_buffer(buf));
           } else {
             error!("cannot get front buffer from pool, closing");
             return SessionResult::CloseSession;
@@ -958,8 +963,11 @@ impl<Front:SocketHandler> Http<Front> {
       // we must now copy the body from front to back
       trace!("100-Continue => copying {} of body from front to back", sz);
       self.front_buf.as_mut().map(|buf| {
+        //FIXME
+        /*
         buf.slice_output(sz);
         buf.consume_parsed_data(sz);
+        */
       });
 
       self.response = Some(ResponseState::Initial);
@@ -1058,14 +1066,13 @@ impl<Front:SocketHandler> Http<Front> {
       return SessionResult::Continue;
     }
 
-    if self.front_buf.as_ref().map(|buf| buf.output_data_size() == 0 || buf.next_output_data().is_empty()).unwrap() {
+    if self.request.as_ref().map(|req| req.next_slice(self.front_buf.as_ref().unwrap().buffer.data()).is_empty()).unwrap() {
       self.front_readiness.interest.insert(Ready::readable());
       self.back_readiness.interest.remove(Ready::writable());
       return SessionResult::Continue;
     }
 
     let tokens = self.tokens();
-    let output_size = self.front_buf.as_ref().unwrap().output_data_size();
     if self.backend.is_none() {
       self.log_request_error(metrics, "back socket not found, closing connection");
       return SessionResult::CloseSession;
@@ -1075,8 +1082,9 @@ impl<Front:SocketHandler> Http<Front> {
     let mut socket_res = SocketResult::Continue;
 
     {
-      let sock = unwrap_msg!(self.backend.as_mut());
-      while socket_res == SocketResult::Continue && self.front_buf.as_ref().unwrap().output_data_size() > 0 {
+      while socket_res == SocketResult::Continue && 
+           self.request.as_ref().map(|req| req.next_slice(self.front_buf.as_ref().unwrap().buffer.data()).len()).unwrap() > 0 {
+        /*FIXME
         // no more data in buffer, stop here
         if self.front_buf.as_ref().unwrap().next_output_data().is_empty() {
           self.front_readiness.interest.insert(Ready::readable());
@@ -1084,17 +1092,19 @@ impl<Front:SocketHandler> Http<Front> {
           metrics.backend_bout += sz;
           return SessionResult::Continue;
         }
+        */
         /*
         let (current_sz, current_res) = sock.socket_write(self.front_buf.as_ref().unwrap().next_output_data());
         */
-        let bufs = self.front_buf.as_ref().unwrap().as_ioslice();
+        let bufs = self.request.as_ref().map(|req| req.as_ioslice(self.front_buf.as_ref().unwrap().buffer.data())).unwrap();
         if bufs.is_empty() {
           break;
         }
+        let sock = unwrap_msg!(self.backend.as_mut());
         let (current_sz, current_res) = sock.socket_write_vectored(&bufs);
         //println!("vectored io returned {:?}", (current_sz, current_res));
         socket_res = current_res;
-        self.front_buf.as_mut().unwrap().consume_output_data(current_sz);
+        self.request.as_mut().unwrap().consume(current_sz);
         sz += current_sz;
       }
     }
@@ -1102,7 +1112,7 @@ impl<Front:SocketHandler> Http<Front> {
     metrics.backend_bout += sz;
 
     if let Some((front,back)) = tokens {
-      debug!("{}\tBACK [{}->{}]: wrote {} bytes of {}", self.log_context(), front.0, back.0, sz, output_size);
+      debug!("{}\tBACK [{}->{}]: wrote {} bytes", self.log_context(), front.0, back.0, sz);
     }
     match socket_res {
       // the back socket is not writable anymore, so we can drop
@@ -1128,7 +1138,7 @@ impl<Front:SocketHandler> Http<Front> {
     }
 
     // FIXME/ should read exactly as much data as needed
-    if self.front_buf.as_ref().unwrap().can_restart_parsing() {
+    if self.request.as_ref().unwrap().can_restart_parsing(self.front_buf.as_ref().unwrap().buffer.available_data()) {
       match self.request {
         // the entire request was transmitted
         Some(RequestState::Request(_,_,_))                            |
@@ -1137,7 +1147,7 @@ impl<Front:SocketHandler> Http<Front> {
           // return the buffer to the pool
           // if there's still data in there, keep it for pipelining
           if self.must_continue_request() &&
-            self.front_buf.as_ref().map(|buf| buf.empty()) == Some(true) {
+            self.front_buf.as_ref().map(|buf| buf.buffer.empty()) == Some(true) {
               self.front_buf = None;
           }
           self.front_readiness.interest.remove(Ready::readable());
@@ -1168,11 +1178,15 @@ impl<Front:SocketHandler> Http<Front> {
           self.front_readiness.interest.insert(Ready::readable());
           SessionResult::Continue
         },
+        /*
         //we're not done parsing the headers
         Some(RequestState::HasRequestLine(_,_))       |
         Some(RequestState::HasHost(_,_,_))            |
         Some(RequestState::HasLength(_,_,_))          |
         Some(RequestState::HasHostAndLength(_,_,_,_)) => {
+        */
+        Some(RequestState::Parsing { .. }) |
+        Some(RequestState::ParsingDone { .. }) => {
           self.front_readiness.interest.insert(Ready::readable());
           SessionResult::Continue
         },

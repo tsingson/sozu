@@ -25,11 +25,13 @@ use std::convert::From;
 use std::collections::HashSet;
 
 mod request;
+pub mod request2;
 mod response;
+mod header;
 #[cfg(test)]
 mod tests;
 
-pub use self::request::*;
+pub use self::request2::*;
 pub use self::response::*;
 
 pub fn compare_no_case(left: &[u8], right: &[u8]) -> bool {
@@ -287,6 +289,69 @@ fn is_single_header_value_char(i: u8) -> bool {
 fn single_header_value(i:&[u8]) -> IResult<&[u8], &[u8]> {
   take_while1_complete(is_single_header_value_char)(i)
 }
+
+pub fn comma_separated_values(mut i:&[u8]) -> impl Iterator<Item=&[u8]> {
+  let mut first = true;
+  let mut done = false;
+
+  std::iter::from_fn(move|| {
+    if done {
+      return None;
+    }
+
+    if first {
+      match single_header_value(i) {
+        Ok((i2, o)) => {
+          i = i2;
+          first = false;
+          return Some(o);
+        },
+        _ => {
+          done = true;
+          return None;
+        }
+      }
+    } else {
+      match tuple((sp, char(','), sp, single_header_value))(i) {
+        Ok((i2, (_, _, _, o))) => {
+          i = i2;
+          return Some(o);
+        },
+        _ => {
+          done = true;
+          return None;
+        }
+      }
+    }
+  })
+}
+/*
+match single_header_value(self.value) {
+  Ok((mut input, first)) => {
+    if compare_no_case(first, b"upgrade") {
+      has_upgrade = true;
+    } else if compare_no_case(first, b"close") {
+      has_close = true;
+    } else if compare_no_case(first, b"keep-alive") {
+      has_keep_alive = true;
+    } else {
+      if to_delete.is_none() {
+        to_delete = Some(HashSet::new());
+      }
+
+      to_delete.as_mut().map(|h| h.insert(Vec::from(first)));
+    }
+
+    while input.len() != 0 {
+      match do_parse!(input,
+        opt!(complete!(sp)) >>
+        complete!(char!(',')) >>
+        opt!(sp) >>
+        v: single_header_value >> (v)
+      ) {
+        Ok((i, v)) => {
+          if compare_no_case(v, b"upgrade") {
+            */
 
 // Content-Disposition header, cf https://tools.ietf.org/html/rfc6266#section-4
 pub fn content_disposition_header_value(i: &[u8]) -> IResult<&[u8], &[u8]> {
