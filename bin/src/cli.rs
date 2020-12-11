@@ -424,8 +424,7 @@ pub enum CertificateCmd {
     chain: String,
     #[structopt(long = "key", help = "path to the key")]
     key: String,
-    #[structopt(long = "tls-versions", help = "accepted TLS versions for this certificate",
-                parse(try_from_str = parse_tls_versions))]
+    #[structopt(long = "tls-versions", help = "accepted TLS versions for this certificate")]
     tls_versions: Vec<TlsVersion>,
   },
   #[structopt(name = "remove", about = "Remove a certificate")]
@@ -451,8 +450,7 @@ pub enum CertificateCmd {
     old_certificate: Option<String>,
     #[structopt(short = "f", long = "fingerprint", help = "old certificate fingerprint")]
     old_fingerprint: Option<String>,
-    #[structopt(long = "tls-versions", help = "accepted TLS versions for this certificate",
-                parse(try_from_str = parse_tls_versions))]
+    #[structopt(long = "tls-versions", help = "accepted TLS versions for this certificate")]
     tls_versions: Vec<TlsVersion>,
   }
 }
