@@ -1634,7 +1634,6 @@ dependencies = [
  "async-dup",
  "async-io",
  "blocking",
- "chrono",
  "clap",
  "futures 0.3.14",
  "futures-lite",
