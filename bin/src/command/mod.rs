@@ -213,7 +213,7 @@ impl CommandServer {
                             res.unwrap()
                         }
                     };
-                println!("Accepted a client from upgraded");
+                debug!("Accepted a client from upgraded");
 
                 let (client_tx, client_rx) = channel(10000);
                 let id = format!("CL-up-{}", counter);
@@ -243,7 +243,7 @@ impl CommandServer {
                 let (worker_tx, worker_rx) = channel(10000);
                 let sender = Some(worker_tx);
 
-                println!("deserializing worker: {:?}", serialized);
+                debug!("deserializing worker: {:?}", serialized);
                 let stream = Async::new(unsafe { UnixStream::from_raw_fd(serialized.fd) }).unwrap();
 
                 let id = serialized.id;
@@ -576,7 +576,7 @@ pub fn start(
                         }
                     };
 
-                println!("Accepted a client");
+                debug!("Accepted a client");
 
                 let (client_tx, client_rx) = channel(10000);
                 let id = format!("CL-{}", counter);
