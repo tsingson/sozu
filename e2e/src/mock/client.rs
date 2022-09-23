@@ -4,6 +4,9 @@ use std::{
     str::from_utf8,
 };
 
+use crate::BUFFER_SIZE;
+
+/// HTTP/TCP mock client
 /// Wrapper over a TCP connection
 pub struct Client {
     pub name: String,
@@ -62,7 +65,7 @@ impl Client {
     pub fn receive(&mut self) -> Option<String> {
         match self.stream {
             Some(ref mut stream) => {
-                let mut buf = [0u8; 4096];
+                let mut buf = [0u8; BUFFER_SIZE];
                 match stream.read(&mut buf) {
                     Ok(0) => {
                         println!("{} received nothing", self.name);

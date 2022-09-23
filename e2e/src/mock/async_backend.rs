@@ -7,8 +7,9 @@ use std::{
 use futures::channel::mpsc;
 
 use crate::{
-    http::http_response,
+    http_utils::http_response,
     mock::aggregator::{Aggregator, SimpleAggregator},
+    BUFFER_SIZE,
 };
 
 /// Handle to a detached thread where a TcpListener runs
@@ -23,7 +24,7 @@ impl<T: Aggregator + Send + Sync + 'static> Backend<T> {
         name: S,
         address: SocketAddr,
         mut aggregator: T,
-        handler: Box<dyn Fn(&TcpStream, T) -> T + Send + Sync>,
+        handler: Box<dyn Fn(&TcpStream, &String, T) -> T + Send + Sync>,
     ) -> Self {
         let name = name.into();
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
@@ -53,7 +54,7 @@ impl<T: Aggregator + Send + Sync + 'static> Backend<T> {
                     }
                 }
                 for client in &clients {
-                    aggregator = handler(client, aggregator);
+                    aggregator = handler(client, &thread_name, aggregator);
                 }
                 match stop_rx.try_next() {
                     Ok(Some(_)) => break,
@@ -84,50 +85,46 @@ impl<T: Aggregator + Send + Sync + 'static> Backend<T> {
 impl Backend<SimpleAggregator> {
     pub fn http_handler<S: Into<String>>(
         content: S,
-    ) -> Box<dyn Fn(&TcpStream, SimpleAggregator) -> SimpleAggregator + Send + Sync> {
+    ) -> Box<dyn Fn(&TcpStream, &String, SimpleAggregator) -> SimpleAggregator + Send + Sync> {
         let content = content.into();
-        Box::new(
-            move |mut stream: &TcpStream, mut aggregator: SimpleAggregator| {
-                let mut buf = [0u8; 4096];
-                match stream.read(&mut buf) {
-                    Ok(0) => return aggregator,
-                    Ok(n) => {
-                        println!("{} received {}", content, n);
-                    }
-                    Err(_) => {
-                        //println!("{} could not receive {}", content, error);
-                        return aggregator;
-                    }
+        Box::new(move |mut stream, backend_name, mut aggregator| {
+            let mut buf = [0u8; BUFFER_SIZE];
+            match stream.read(&mut buf) {
+                Ok(0) => return aggregator,
+                Ok(n) => {
+                    println!("{} received {}", backend_name, n);
                 }
-                aggregator.received += 1;
-                let response = http_response(&content);
-                stream.write_all(response.as_bytes()).unwrap();
-                aggregator.sent += 1;
-                aggregator
-            },
-        )
+                Err(_) => {
+                    //println!("{} could not receive {}", content, error);
+                    return aggregator;
+                }
+            }
+            aggregator.received += 1;
+            let response = http_response(&content);
+            stream.write_all(response.as_bytes()).unwrap();
+            aggregator.sent += 1;
+            aggregator
+        })
     }
     pub fn tcp_handler<S: Into<String>>(
         content: String,
-    ) -> Box<dyn Fn(&TcpStream, SimpleAggregator) -> SimpleAggregator + Send + Sync> {
+    ) -> Box<dyn Fn(&TcpStream, &String, SimpleAggregator) -> SimpleAggregator + Send + Sync> {
         let content: String = content.into();
-        Box::new(
-            move |mut stream: &TcpStream, mut aggregator: SimpleAggregator| {
-                let mut buf = [0u8; 4096];
-                match stream.read(&mut buf) {
-                    Ok(0) => return aggregator,
-                    Ok(n) => {
-                        println!("{} received {}", content, n);
-                    }
-                    Err(error) => {
-                        println!("{} could not receive {}", content, error);
-                        return aggregator;
-                    }
+        Box::new(move |mut stream, backend_name, mut aggregator| {
+            let mut buf = [0u8; BUFFER_SIZE];
+            match stream.read(&mut buf) {
+                Ok(0) => return aggregator,
+                Ok(n) => {
+                    println!("{} received {}", backend_name, n);
                 }
-                stream.write_all(content.as_bytes()).unwrap();
-                aggregator.sent += 1;
-                aggregator
-            },
-        )
+                Err(error) => {
+                    println!("{} could not receive {}", content, error);
+                    return aggregator;
+                }
+            }
+            stream.write_all(content.as_bytes()).unwrap();
+            aggregator.sent += 1;
+            aggregator
+        })
     }
 }

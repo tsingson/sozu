@@ -1,12 +1,12 @@
-use http::{http_request, http_response};
+use http_utils::{http_request, http_response};
 use sozu_command_lib::{
     config::{Config, FileConfig},
     proxy::{ActivateListener, ListenerType, ProxyRequestOrder},
     scm_socket::Listeners,
 };
-use std::net::SocketAddr;
+use std::{io::stdin, net::SocketAddr};
 
-mod http;
+mod http_utils;
 mod mock;
 mod sozu;
 
@@ -16,6 +16,8 @@ use mock::{
     aggregator::SimpleAggregator, async_backend::Backend as AsyncBackend, client::Client,
     sync_backend::Backend as SyncBackend,
 };
+
+const BUFFER_SIZE: usize = 4096;
 
 /// Setup a Sozu worker with
 /// - `config`
@@ -51,7 +53,7 @@ fn test_setup(
     for i in 0..nb_backends {
         let back_address = format!("127.0.0.1:{}", 2002 + i)
             .parse()
-            .expect("could not parse front address");
+            .expect("could not parse back address");
         worker.send_proxy_request(ProxyRequestOrder::AddBackend(Worker::default_backend(
             "cluster_0",
             format!("cluster_0-{}", i),
@@ -111,15 +113,16 @@ fn sync_test_setup(
     (worker, backends)
 }
 
-fn test_async(nb_requests: usize) {
+fn test_async(nb_backends: usize, nb_clients: usize, nb_requests: usize) {
     let front_address = "127.0.0.1:2001"
         .parse()
         .expect("could not parse front address");
 
     let (config, listeners) = Worker::empty_config();
-    let (worker, mut backends) = async_test_setup(config, listeners, front_address, 3);
+    let (mut worker, mut backends) =
+        async_test_setup(config, listeners, front_address, nb_backends);
 
-    let mut clients = (0..10)
+    let mut clients = (0..nb_clients)
         .map(|i| {
             Client::new(
                 format!("client{}", i),
@@ -143,6 +146,9 @@ fn test_async(nb_requests: usize) {
         }
     }
 
+    worker.send_proxy_request(ProxyRequestOrder::HardStop);
+    worker.wait();
+
     for client in clients {
         println!(
             "{} sent: {}, received: {}",
@@ -153,22 +159,20 @@ fn test_async(nb_requests: usize) {
         let aggregator = backend.stop_and_get_aggregator();
         println!("{} aggregated: {:?}", backend.name, aggregator);
     }
-
-    worker.stop();
 }
 
-fn test_sync(nb_requests: usize) {
+fn test_sync(nb_clients: usize, nb_requests: usize) {
     let front_address = "127.0.0.1:2001"
         .parse()
         .expect("could not parse front address");
 
     let (config, listeners) = Worker::empty_config();
-    let (worker, mut backends) = sync_test_setup(config, listeners, front_address, 1);
+    let (mut worker, mut backends) = sync_test_setup(config, listeners, front_address, 1);
     let mut backend = backends.pop().unwrap();
 
     backend.connect();
 
-    let mut clients = (0..10)
+    let mut clients = (0..nb_clients)
         .map(|i| {
             Client::new(
                 format!("client{}", i),
@@ -189,7 +193,7 @@ fn test_sync(nb_requests: usize) {
         for client in clients.iter_mut() {
             client.send();
         }
-        for i in 0..clients.len() {
+        for i in 0..nb_clients {
             backend.receive(i);
             backend.send(i);
         }
@@ -201,6 +205,9 @@ fn test_sync(nb_requests: usize) {
         }
     }
 
+    worker.send_proxy_request(ProxyRequestOrder::HardStop);
+    worker.wait();
+
     for client in clients {
         println!(
             "{} sent: {}, received: {}",
@@ -211,21 +218,19 @@ fn test_sync(nb_requests: usize) {
         "{} sent: {}, received: {}",
         backend.name, backend.sent, backend.received
     );
-
-    worker.stop();
 }
 
-fn test_issue_806(nb_requests: usize, zombie: bool) {
+fn test_backend_stop(nb_requests: usize, zombie: Option<u32>) {
     let front_address = "127.0.0.1:2001"
         .parse()
         .expect("could not parse front address");
 
     let config = Worker::into_config(FileConfig {
-        zombie_check_interval: if zombie { Some(1) } else { None },
+        zombie_check_interval: zombie,
         ..Worker::empty_file_config()
     });
     let listeners = Worker::empty_listeners();
-    let (worker, mut backends) = async_test_setup(config, listeners, front_address, 2);
+    let (mut worker, mut backends) = async_test_setup(config, listeners, front_address, 2);
     let mut backend2 = backends.pop().expect("backend2");
     let mut backend1 = backends.pop().expect("backend1");
 
@@ -250,18 +255,137 @@ fn test_issue_806(nb_requests: usize, zombie: bool) {
         }
     }
 
+    worker.send_proxy_request(ProxyRequestOrder::HardStop);
+    worker.wait();
+
     println!("sent: {}, received: {}", client.sent, client.received);
     println!("backend1 aggregator: {:?}", aggregator);
     aggregator = backend2.stop_and_get_aggregator();
     println!("backend2 aggregator: {:?}", aggregator);
+}
 
-    worker.stop();
+fn test_issue_806() {
+    test_backend_stop(2, None);
+}
+fn test_issue_808() {
+    test_backend_stop(2, Some(1));
+}
+
+fn test_issue_810_timeout() {
+    let front_address = "127.0.0.1:2001"
+        .parse()
+        .expect("could not parse front address");
+
+    let (config, listeners) = Worker::empty_config();
+    let (mut worker, mut backends) = sync_test_setup(config, listeners, front_address, 1);
+    let mut backend = backends.pop().unwrap();
+
+    let mut client = Client::new("client", front_address, http_request("GET", "/api", "ping"));
+
+    backend.connect();
+    client.connect();
+    client.send();
+    backend.accept(0);
+    backend.receive(0);
+    backend.send(0);
+    client.receive();
+
+    worker.send_proxy_request(ProxyRequestOrder::SoftStop);
+    worker.wait();
+
+    println!(
+        "{} sent: {}, received: {}",
+        client.name, client.sent, client.received
+    );
+    println!(
+        "{} sent: {}, received: {}",
+        backend.name, backend.sent, backend.received
+    );
+}
+
+fn test_issue_810_panic(part2: bool) {
+    let front_address = "127.0.0.1:2001"
+        .parse()
+        .expect("could not parse front address");
+    let back_address = format!("127.0.0.1:2002")
+        .parse()
+        .expect("could not parse back address");
+
+    let (config, listeners) = Worker::empty_config();
+    let mut worker = Worker::start_new_worker(config, listeners);
+
+    worker.send_proxy_request(ProxyRequestOrder::AddTcpListener(
+        Worker::default_tcp_listener(front_address),
+    ));
+    worker.send_proxy_request(ProxyRequestOrder::ActivateListener(ActivateListener {
+        address: front_address,
+        proxy: ListenerType::TCP,
+        from_scm: false,
+    }));
+    worker.send_proxy_request(ProxyRequestOrder::AddCluster(Worker::default_cluster(
+        "cluster_0",
+    )));
+    worker.send_proxy_request(ProxyRequestOrder::AddTcpFrontend(
+        Worker::default_tcp_frontend("cluster_0", front_address),
+    ));
+
+    worker.send_proxy_request(ProxyRequestOrder::AddBackend(Worker::default_backend(
+        "cluster_0",
+        "cluster_0-0",
+        back_address,
+    )));
+    worker.read_to_last();
+
+    let mut backend = SyncBackend::new("backend", back_address, "pong");
+    let mut client = Client::new("client", front_address, "ping");
+
+    backend.connect();
+    client.connect();
+    client.send();
+    if !part2 {
+        backend.accept(0);
+        backend.receive(0);
+        backend.send(0);
+        client.receive();
+    }
+
+    worker.send_proxy_request(ProxyRequestOrder::SoftStop);
+    worker.wait();
+
+    println!(
+        "{} sent: {}, received: {}",
+        client.name, client.sent, client.received
+    );
+    println!(
+        "{} sent: {}, received: {}",
+        backend.name, backend.sent, backend.received
+    );
+}
+
+fn wait_input<S: Into<String>>(s: S) {
+    println!("==================================================================");
+    println!("{}", s.into());
+    println!("==================================================================");
+    let mut buf = String::new();
+    stdin().read_line(&mut buf).expect("bad input");
 }
 
 fn main() {
-    test_sync(100);
-    test_async(100);
+    wait_input("test_sync");
+    test_sync(10, 100);
+    wait_input("test_async");
+    test_async(3, 10, 100);
     // https://github.com/sozu-proxy/sozu/issues/806
-    test_issue_806(2, false);
-    test_issue_806(2, true);
+    wait_input("issue 806: timeout with invalid back token");
+    test_issue_806();
+    // https://github.com/sozu-proxy/sozu/issues/808
+    wait_input("issue 808: panic on successful zombie check");
+    test_issue_808();
+    // https://github.com/sozu-proxy/sozu/issues/810
+    wait_input("issue 810: shutdown struggles until session timeout");
+    test_issue_810_timeout();
+    wait_input("issue 810: shutdown panics on session close");
+    test_issue_810_panic(false);
+    wait_input("issue 810: shutdown panics on tcp connection after proxy cleared its listeners");
+    test_issue_810_panic(true);
 }

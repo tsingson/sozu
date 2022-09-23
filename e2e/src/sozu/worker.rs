@@ -14,8 +14,9 @@ use sozu_command::{
     channel::Channel,
     config::{Config, FileConfig},
     proxy::{
-        Backend, Cluster, HttpFrontend, HttpListener, LoadBalancingAlgorithms, LoadBalancingParams,
-        PathRule, ProxyRequest, ProxyRequestOrder, ProxyResponse, Route, RulePosition,
+        Backend, Cluster, HttpFrontend, HttpListener, HttpsListener, LoadBalancingAlgorithms,
+        LoadBalancingParams, PathRule, ProxyRequest, ProxyRequestOrder, ProxyResponse, Route,
+        RulePosition, TcpFrontend, TcpListener,
     },
     scm_socket::{Listeners, ScmSocket},
     state::ConfigState,
@@ -149,8 +150,7 @@ impl Worker {
         }
     }
 
-    pub fn stop(mut self) {
-        self.send_proxy_request(ProxyRequestOrder::HardStop);
+    pub fn wait(mut self) {
         if self.job.is_finished() {
             println!("already finished...");
         } else {
@@ -162,10 +162,36 @@ impl Worker {
         }
     }
 
+    pub fn default_tcp_listener(address: SocketAddr) -> TcpListener {
+        TcpListener {
+            address,
+            public_address: None,
+            expect_proxy: false,
+            front_timeout: 60,
+            back_timeout: 30,
+            connect_timeout: 3,
+        }
+    }
     pub fn default_http_listener(address: SocketAddr) -> HttpListener {
         HttpListener {
             address,
+            public_address: None,
+            expect_proxy: false,
+            front_timeout: 60,
+            back_timeout: 30,
+            connect_timeout: 3,
             ..HttpListener::default()
+        }
+    }
+    pub fn default_https_listener(address: SocketAddr) -> HttpsListener {
+        HttpsListener {
+            address,
+            public_address: None,
+            expect_proxy: false,
+            front_timeout: 60,
+            back_timeout: 30,
+            connect_timeout: 3,
+            ..HttpsListener::default()
         }
     }
     pub fn default_cluster<S: Into<String>>(cluster_id: S) -> Cluster {
@@ -177,6 +203,16 @@ impl Worker {
             load_balancing: LoadBalancingAlgorithms::default(),
             load_metric: None,
             answer_503: None,
+        }
+    }
+    pub fn default_tcp_frontend<S: Into<String>>(
+        cluster_id: S,
+        address: SocketAddr,
+    ) -> TcpFrontend {
+        TcpFrontend {
+            cluster_id: cluster_id.into(),
+            address,
+            tags: None,
         }
     }
     pub fn default_http_frontend<S: Into<String>>(
