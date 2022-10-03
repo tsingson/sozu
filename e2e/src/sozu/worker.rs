@@ -90,15 +90,16 @@ impl Worker {
         let scm_main = ScmSocket::new(scm_main.as_raw_fd());
         scm_main
             .send_listeners(&listeners)
-            .expect("coulnd not send listeners");
+            .expect("could not send listeners");
 
-        Server::new_from_config(
+        Server::try_new_from_config(
             cmd_worker,
             ScmSocket::new(scm_worker.as_raw_fd()),
             config,
             ConfigState::new(),
             false,
         )
+        .expect("could not create sozu worker")
     }
 
     pub fn start_new_worker(config: Config, listeners: Listeners) -> Self {
@@ -110,16 +111,17 @@ impl Worker {
         let scm_main = ScmSocket::new(scm_main.as_raw_fd());
         scm_main
             .send_listeners(&listeners)
-            .expect("coulnd not send listeners");
+            .expect("could not send listeners");
 
         let job = thread::spawn(move || {
-            let mut server = Server::new_from_config(
+            let mut server = Server::try_new_from_config(
                 cmd_worker,
                 ScmSocket::new(scm_worker.as_raw_fd()),
                 config,
                 ConfigState::new(),
                 false,
-            );
+            )
+            .expect("could not create sozu worker");
             server.run();
         });
 
