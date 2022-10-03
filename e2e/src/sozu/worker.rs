@@ -150,7 +150,7 @@ impl Worker {
         }
     }
 
-    pub fn wait(mut self) {
+    pub fn wait(self) {
         if self.job.is_finished() {
             println!("already finished...");
         } else {

@@ -346,7 +346,8 @@ fn test_issue_810_panic(part2: bool) {
         backend.accept(0);
         backend.receive(0);
         backend.send(0);
-        client.receive();
+        let response = client.receive();
+        println!("Response: {:?}", response);
     }
 
     worker.send_proxy_request(ProxyRequestOrder::SoftStop);
@@ -362,6 +363,56 @@ fn test_issue_810_panic(part2: bool) {
     );
 }
 
+fn test_http(nb_requests: usize) {
+    let front_address = "127.0.0.1:2001"
+        .parse()
+        .expect("could not parse front address");
+
+    let (config, listeners) = Worker::empty_config();
+    let (mut worker, mut backends) = async_test_setup(config, listeners, front_address, 1);
+    let mut backend = backends.pop().expect("backend");
+
+    let mut bad_client = Client::new(
+        format!("bad_client"),
+        front_address,
+        "GET /api HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\nContent-Length: 3\r\n\r\nbad_ping",
+    );
+    let mut good_client = Client::new(
+        format!("good_client"),
+        front_address,
+        http_request("GET", "/api", "good_ping"),
+    );
+    bad_client.connect();
+    good_client.connect();
+
+    for _ in 0..nb_requests {
+        bad_client.send();
+        good_client.send();
+        match bad_client.receive() {
+            Some(msg) => println!("response: {}", msg),
+            None => {}
+        }
+        match good_client.receive() {
+            Some(msg) => println!("response: {}", msg),
+            None => {}
+        }
+    }
+
+    worker.send_proxy_request(ProxyRequestOrder::HardStop);
+    worker.wait();
+
+    println!(
+        "{} sent: {}, received: {}",
+        bad_client.name, bad_client.sent, bad_client.received
+    );
+    println!(
+        "{} sent: {}, received: {}",
+        good_client.name, good_client.sent, good_client.received
+    );
+    let aggregator = backend.stop_and_get_aggregator();
+    println!("backend aggregator: {:?}", aggregator);
+}
+
 fn wait_input<S: Into<String>>(s: S) {
     println!("==================================================================");
     println!("{}", s.into());
@@ -371,6 +422,8 @@ fn wait_input<S: Into<String>>(s: S) {
 }
 
 fn main() {
+    wait_input("test_http");
+    test_http(2);
     wait_input("test_sync");
     test_sync(10, 100);
     wait_input("test_async");
@@ -379,13 +432,13 @@ fn main() {
     wait_input("issue 806: timeout with invalid back token");
     test_issue_806();
     // https://github.com/sozu-proxy/sozu/issues/808
-    wait_input("issue 808: panic on successful zombie check");
+    wait_input("issue 808: panic on successful zombie check\n(fixed)");
     test_issue_808();
     // https://github.com/sozu-proxy/sozu/issues/810
-    wait_input("issue 810: shutdown struggles until session timeout");
+    wait_input("issue 810: shutdown struggles until session timeout\n(fixed)");
     test_issue_810_timeout();
-    wait_input("issue 810: shutdown panics on session close");
+    wait_input("issue 810: shutdown panics on session close\n(fixed)");
     test_issue_810_panic(false);
-    wait_input("issue 810: shutdown panics on tcp connection after proxy cleared its listeners");
+    wait_input("issue 810: shutdown panics on tcp connection after proxy cleared its listeners\n(opinionated fix)");
     test_issue_810_panic(true);
 }

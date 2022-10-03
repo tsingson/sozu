@@ -1,6 +1,7 @@
 use std::{
     io::{ErrorKind, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
+    str::from_utf8_unchecked,
     thread,
 };
 
@@ -93,6 +94,7 @@ impl Backend<SimpleAggregator> {
                 Ok(0) => return aggregator,
                 Ok(n) => {
                     println!("{} received {}", backend_name, n);
+                    println!("{}", unsafe { from_utf8_unchecked(&buf) });
                 }
                 Err(_) => {
                     //println!("{} could not receive {}", content, error);
