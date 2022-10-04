@@ -4,7 +4,11 @@ use sozu_command_lib::{
     proxy::{ActivateListener, ListenerType, ProxyRequestOrder},
     scm_socket::Listeners,
 };
-use std::{io::stdin, net::SocketAddr};
+use std::{
+    io::stdin,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 
 mod http_utils;
 mod mock;
@@ -18,6 +22,12 @@ use mock::{
 };
 
 const BUFFER_SIZE: usize = 4096;
+
+enum State {
+    Success,
+    Fail,
+    Verified,
+}
 
 /// Setup a Sozu worker with
 /// - `config`
@@ -220,7 +230,7 @@ fn test_sync(nb_clients: usize, nb_requests: usize) {
     );
 }
 
-fn test_backend_stop(nb_requests: usize, zombie: Option<u32>) {
+fn test_backend_stop(nb_requests: usize, zombie: Option<u32>) -> State {
     let front_address = "127.0.0.1:2001"
         .parse()
         .expect("could not parse front address");
@@ -242,6 +252,7 @@ fn test_backend_stop(nb_requests: usize, zombie: Option<u32>) {
     let mut client = Client::new("client", front_address, http_request("GET", "/api", "ping"));
     client.connect();
 
+    let start = Instant::now();
     for i in 0..nb_requests {
         if client.send().is_none() {
             break;
@@ -254,24 +265,33 @@ fn test_backend_stop(nb_requests: usize, zombie: Option<u32>) {
             aggregator = backend1.stop_and_get_aggregator();
         }
     }
+    let duration = Instant::now().duration_since(start);
 
     worker.send_proxy_request(ProxyRequestOrder::HardStop);
-    worker.wait();
+    let success = worker.wait();
 
     println!("sent: {}, received: {}", client.sent, client.received);
     println!("backend1 aggregator: {:?}", aggregator);
     aggregator = backend2.stop_and_get_aggregator();
     println!("backend2 aggregator: {:?}", aggregator);
+
+    if !success {
+        State::Fail
+    } else if duration > Duration::from_millis(100) {
+        State::Verified
+    } else {
+        State::Success
+    }
 }
 
-fn test_issue_806() {
-    test_backend_stop(2, None);
+fn test_issue_806() -> State {
+    test_backend_stop(2, None)
 }
-fn test_issue_808() {
-    test_backend_stop(2, Some(1));
+fn test_issue_808() -> State {
+    test_backend_stop(2, Some(1))
 }
 
-fn test_issue_810_timeout() {
+fn test_issue_810_timeout() -> State {
     let front_address = "127.0.0.1:2001"
         .parse()
         .expect("could not parse front address");
@@ -291,7 +311,9 @@ fn test_issue_810_timeout() {
     client.receive();
 
     worker.send_proxy_request(ProxyRequestOrder::SoftStop);
-    worker.wait();
+    let start = Instant::now();
+    let success = worker.wait();
+    let duration = Instant::now().duration_since(start);
 
     println!(
         "{} sent: {}, received: {}",
@@ -301,9 +323,15 @@ fn test_issue_810_timeout() {
         "{} sent: {}, received: {}",
         backend.name, backend.sent, backend.received
     );
+
+    if !success || duration > Duration::from_millis(100) {
+        State::Fail
+    } else {
+        State::Success
+    }
 }
 
-fn test_issue_810_panic(part2: bool) {
+fn test_issue_810_panic(part2: bool) -> State {
     let front_address = "127.0.0.1:2001"
         .parse()
         .expect("could not parse front address");
@@ -351,7 +379,7 @@ fn test_issue_810_panic(part2: bool) {
     }
 
     worker.send_proxy_request(ProxyRequestOrder::SoftStop);
-    worker.wait();
+    let success = worker.wait();
 
     println!(
         "{} sent: {}, received: {}",
@@ -361,6 +389,46 @@ fn test_issue_810_panic(part2: bool) {
         "{} sent: {}, received: {}",
         backend.name, backend.sent, backend.received
     );
+
+    if success {
+        State::Success
+    } else {
+        State::Fail
+    }
+}
+
+fn test_issue_810_panic_variant() -> State {
+    let front_address = "127.0.0.1:2001"
+        .parse()
+        .expect("could not parse front address");
+
+    let (config, listeners) = Worker::empty_config();
+    let (mut worker, mut backends) = sync_test_setup(config, listeners, front_address, 1);
+
+    let mut backend = backends.pop().expect("backend");
+    let mut client = Client::new("client", front_address, http_request("GET", "/api", "ping"));
+
+    backend.connect();
+    client.connect();
+    client.send();
+
+    worker.send_proxy_request(ProxyRequestOrder::SoftStop);
+    let success = worker.wait();
+
+    println!(
+        "{} sent: {}, received: {}",
+        client.name, client.sent, client.received
+    );
+    println!(
+        "{} sent: {}, received: {}",
+        backend.name, backend.sent, backend.received
+    );
+
+    if success {
+        State::Success
+    } else {
+        State::Fail
+    }
 }
 
 fn test_http(nb_requests: usize) {
@@ -421,6 +489,35 @@ fn wait_input<S: Into<String>>(s: S) {
     stdin().read_line(&mut buf).expect("bad input");
 }
 
+fn reapeat_until_error_or<F>(times: usize, test: F)
+where
+    F: Fn() -> State + Sized,
+{
+    for i in 1..=times {
+        let state = test();
+        match state {
+            State::Success => {}
+            State::Fail => {
+                println!("------------------------------------------------------------------");
+                println!("Test not successful after: {} iterations", i);
+                return;
+            }
+            State::Verified => {
+                println!("------------------------------------------------------------------");
+                println!("Test passed after: {} iterations", i);
+                return;
+            }
+        }
+    }
+    println!("------------------------------------------------------------------");
+    println!("Test successful after: {} iterations", times);
+}
+
+fn repeat_test<S: Into<String>, F: Fn() -> State + Sized>(s: S, times: usize, test: F) {
+    wait_input(s);
+    reapeat_until_error_or(times, test);
+}
+
 fn main() {
     wait_input("test_http");
     test_http(2);
@@ -429,16 +526,36 @@ fn main() {
     wait_input("test_async");
     test_async(3, 10, 100);
     // https://github.com/sozu-proxy/sozu/issues/806
-    wait_input("issue 806: timeout with invalid back token");
-    test_issue_806();
+    repeat_test(
+        "issue 806: timeout with invalid back token",
+        1000,
+        test_issue_806,
+    );
     // https://github.com/sozu-proxy/sozu/issues/808
-    wait_input("issue 808: panic on successful zombie check\n(fixed)");
-    test_issue_808();
+    repeat_test(
+        "issue 808: panic on successful zombie check\n(fixed)",
+        1000,
+        test_issue_808,
+    );
     // https://github.com/sozu-proxy/sozu/issues/810
-    wait_input("issue 810: shutdown struggles until session timeout\n(fixed)");
-    test_issue_810_timeout();
-    wait_input("issue 810: shutdown panics on session close\n(fixed)");
-    test_issue_810_panic(false);
-    wait_input("issue 810: shutdown panics on tcp connection after proxy cleared its listeners\n(opinionated fix)");
-    test_issue_810_panic(true);
+    repeat_test(
+        "issue 810: shutdown struggles until session timeout\n(fixed)",
+        1000,
+        test_issue_810_timeout,
+    );
+    repeat_test(
+        "issue 810: shutdown panics on session close\n(fixed)",
+        1000,
+        || test_issue_810_panic(false),
+    );
+    repeat_test(
+        "issue 810: shutdown panics on tcp connection after proxy cleared its listeners\n(opinionated fix)",
+        1000,
+        || test_issue_810_panic(true)
+    );
+    repeat_test(
+        "issue 812: shutdown panics on http connection accept after proxy cleared its listeners",
+        1000,
+        test_issue_810_panic_variant,
+    );
 }

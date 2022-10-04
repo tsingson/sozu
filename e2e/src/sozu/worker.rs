@@ -152,14 +152,21 @@ impl Worker {
         }
     }
 
-    pub fn wait(self) {
+    pub fn wait(self) -> bool {
         if self.job.is_finished() {
             println!("already finished...");
+            true
         } else {
             println!("waiting...");
             match self.job.join() {
-                Ok(_) => println!("finished!"),
-                Err(error) => println!("could not join: {:#?}", error),
+                Ok(_) => {
+                    println!("finished!");
+                    true
+                }
+                Err(error) => {
+                    println!("could not join: {:#?}", error);
+                    false
+                }
             }
         }
     }
