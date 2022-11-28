@@ -1026,7 +1026,7 @@ impl Server {
                     ref id,
                     order: ProxyRequestOrder::DeactivateListener(ref deactivate),
                 } => self.notify_deactivate_listener(id, deactivate),
-                ref m => push_queue(self.http.borrow_mut().notify(m.clone())),
+                ref request => push_queue(self.http.borrow_mut().notify(request.clone())),
             }
         }
         if topics.contains(&Topic::HttpsProxyConfig) {
@@ -1048,7 +1048,7 @@ impl Server {
                     ref id,
                     order: ProxyRequestOrder::DeactivateListener(ref deactivate),
                 } => self.notify_deactivate_listener(id, deactivate),
-                ref m => push_queue(self.https.borrow_mut().notify(m.clone())),
+                ref request => push_queue(self.https.borrow_mut().notify(request.clone())),
             }
         }
         if topics.contains(&Topic::TcpProxyConfig) {
@@ -1070,7 +1070,7 @@ impl Server {
                     ref id,
                     order: ProxyRequestOrder::DeactivateListener(ref deactivate),
                 } => self.notify_deactivate_listener(id, deactivate),
-                m => push_queue(self.tcp.borrow_mut().notify(m)),
+                request => push_queue(self.tcp.borrow_mut().notify(request)),
             }
         }
     }
@@ -1119,24 +1119,22 @@ impl Server {
             return;
         }
 
-        let mut s = self.sessions.borrow_mut();
-        let entry = s.slab.vacant_entry();
+        let mut session_manager = self.sessions.borrow_mut();
+        let entry = session_manager.slab.vacant_entry();
         let token = Token(entry.key());
 
-        let status = if self
-            .http
-            .borrow_mut()
-            .add_listener(listener.clone(), token)
-            .is_some()
-        {
-            entry.insert(Rc::new(RefCell::new(ListenSession {
-                protocol: Protocol::HTTPListen,
-            })));
-            self.base_sessions_count += 1;
-            ProxyResponseStatus::Ok
-        } else {
-            error!("Couldn't add HTTP listener");
-            ProxyResponseStatus::Error(String::from("cannot add HTTP listener"))
+        let status = match self.http.borrow_mut().add_listener(listener.clone(), token) {
+            Some(_token) => {
+                entry.insert(Rc::new(RefCell::new(ListenSession {
+                    protocol: Protocol::HTTPListen,
+                })));
+                self.base_sessions_count += 1;
+                ProxyResponseStatus::Ok
+            }
+            None => {
+                error!("Couldn't add HTTP listener");
+                ProxyResponseStatus::Error(String::from("cannot add HTTP listener"))
+            }
         };
 
         push_queue(ProxyResponse::status(req_id, status));
@@ -1153,24 +1151,26 @@ impl Server {
             return;
         }
 
-        let mut s = self.sessions.borrow_mut();
-        let entry = s.slab.vacant_entry();
+        let mut session_manager = self.sessions.borrow_mut();
+        let entry = session_manager.slab.vacant_entry();
         let token = Token(entry.key());
 
-        let status = if self
+        let status = match self
             .https
             .borrow_mut()
             .add_listener(listener.clone(), token)
-            .is_some()
         {
-            entry.insert(Rc::new(RefCell::new(ListenSession {
-                protocol: Protocol::HTTPSListen,
-            })));
-            self.base_sessions_count += 1;
-            ProxyResponseStatus::Ok
-        } else {
-            error!("Couldn't add HTTPS listener");
-            ProxyResponseStatus::Error(String::from("cannot add HTTPS listener"))
+            Some(_token) => {
+                entry.insert(Rc::new(RefCell::new(ListenSession {
+                    protocol: Protocol::HTTPSListen,
+                })));
+                self.base_sessions_count += 1;
+                ProxyResponseStatus::Ok
+            }
+            None => {
+                error!("Couldn't add HTTPS listener");
+                ProxyResponseStatus::Error(String::from("cannot add HTTPS listener"))
+            }
         };
 
         push_queue(ProxyResponse::status(req_id.to_string(), status));
@@ -1187,50 +1187,49 @@ impl Server {
             return;
         }
 
-        let mut s = self.sessions.borrow_mut();
-        let entry = s.slab.vacant_entry();
+        let mut session_manager = self.sessions.borrow_mut();
+        let entry = session_manager.slab.vacant_entry();
         let token = Token(entry.key());
 
-        let status = if self
+        let status = match self
             .tcp
             .borrow_mut()
             .add_listener(listener, self.pool.clone(), token)
-            .is_some()
         {
-            entry.insert(Rc::new(RefCell::new(ListenSession {
-                protocol: Protocol::TCPListen,
-            })));
-            self.base_sessions_count += 1;
-            ProxyResponseStatus::Ok
-        } else {
-            error!("Couldn't add TCP listener");
-            ProxyResponseStatus::Error(String::from("cannot add TCP listener"))
+            Some(_token) => {
+                entry.insert(Rc::new(RefCell::new(ListenSession {
+                    protocol: Protocol::TCPListen,
+                })));
+                self.base_sessions_count += 1;
+                ProxyResponseStatus::Ok
+            }
+            None => {
+                error!("Couldn't add TCP listener");
+                ProxyResponseStatus::Error(String::from("cannot add TCP listener"))
+            }
         };
 
         push_queue(ProxyResponse::status(req_id, status));
     }
 
     fn notify_remove_listener(&mut self, req_id: &str, remove: &RemoveListener) {
+        debug!("{} remove {:?} listener {:?}", req_id, remove.proxy, remove);
+        self.base_sessions_count -= 1;
+
         match remove.proxy {
             ListenerType::HTTP => {
-                debug!("{} remove http listener {:?}", req_id, remove);
-                self.base_sessions_count -= 1;
                 push_queue(self.http.borrow_mut().notify(ProxyRequest {
                     id: req_id.to_string(),
                     order: ProxyRequestOrder::RemoveListener(remove.clone()),
                 }));
             }
             ListenerType::HTTPS => {
-                debug!("{} remove https listener {:?}", req_id, remove);
-                self.base_sessions_count -= 1;
                 push_queue(self.https.borrow_mut().notify(ProxyRequest {
                     id: req_id.to_string(),
                     order: ProxyRequestOrder::RemoveListener(remove.clone()),
                 }));
             }
             ListenerType::TCP => {
-                debug!("{} remove tcp listener {:?}", req_id, remove);
-                self.base_sessions_count -= 1;
                 push_queue(self.tcp.borrow_mut().notify(ProxyRequest {
                     id: req_id.to_string(),
                     order: ProxyRequestOrder::RemoveListener(remove.clone()),
@@ -1240,19 +1239,24 @@ impl Server {
     }
 
     fn notify_activate_listener(&mut self, req_id: &str, activate: &ActivateListener) {
-        match activate.proxy {
+        debug!(
+            "{} activate {:?} listener {:?}",
+            req_id, activate.proxy, activate
+        );
+
+        let response_status = match activate.proxy {
             ListenerType::HTTP => {
-                debug!("{} activate http listener {:?}", req_id, activate);
                 let listener = self
                     .scm_listeners
                     .as_mut()
                     .and_then(|s| s.get_http(&activate.address))
                     .map(|fd| unsafe { MioTcpListener::from_raw_fd(fd) });
-                let res = self
+
+                let listener_token = self
                     .http
                     .borrow_mut()
                     .activate_listener(&activate.address, listener);
-                let status = match res {
+                match listener_token {
                     Some(token) => {
                         self.accept(ListenToken(token.0), Protocol::HTTPListen);
                         ProxyResponseStatus::Ok
@@ -1261,22 +1265,20 @@ impl Server {
                         error!("Couldn't activate HTTP listener");
                         ProxyResponseStatus::Error(String::from("cannot activate HTTP listener"))
                     }
-                };
-
-                push_queue(ProxyResponse::status(req_id.to_string(), status));
+                }
             }
             ListenerType::HTTPS => {
-                debug!("{} activate https listener {:?}", req_id, activate);
                 let listener = self
                     .scm_listeners
                     .as_mut()
                     .and_then(|s| s.get_https(&activate.address))
                     .map(|fd| unsafe { MioTcpListener::from_raw_fd(fd) });
-                let res = self
+
+                let listener_token = self
                     .https
                     .borrow_mut()
                     .activate_listener(&activate.address, listener);
-                let status = match res {
+                match listener_token {
                     Some(token) => {
                         self.accept(ListenToken(token.0), Protocol::HTTPSListen);
                         ProxyResponseStatus::Ok
@@ -1285,22 +1287,20 @@ impl Server {
                         error!("Couldn't activate HTTPS listener");
                         ProxyResponseStatus::Error(String::from("cannot activate HTTPS listener"))
                     }
-                };
-
-                push_queue(ProxyResponse::status(req_id.to_string(), status));
+                }
             }
             ListenerType::TCP => {
-                debug!("{} activate tcp listener {:?}", req_id, activate);
                 let listener = self
                     .scm_listeners
                     .as_mut()
                     .and_then(|s| s.get_tcp(&activate.address))
                     .map(|fd| unsafe { MioTcpListener::from_raw_fd(fd) });
-                let res = self
+
+                let listener_token = self
                     .tcp
                     .borrow_mut()
                     .activate_listener(&activate.address, listener);
-                let status = match res {
+                match listener_token {
                     Some(token) => {
                         self.accept(ListenToken(token.0), Protocol::TCPListen);
                         ProxyResponseStatus::Ok
@@ -1309,18 +1309,22 @@ impl Server {
                         error!("Couldn't activate TCP listener");
                         ProxyResponseStatus::Error(String::from("cannot activate TCP listener"))
                     }
-                };
-
-                push_queue(ProxyResponse::status(req_id.to_string(), status));
+                }
             }
-        }
+        };
+
+        push_queue(ProxyResponse::status(req_id.to_string(), response_status));
     }
 
     fn notify_deactivate_listener(&mut self, req_id: &str, deactivate: &DeactivateListener) {
-        match deactivate.proxy {
+        debug!(
+            "{} deactivate {:?} listener {:?}",
+            req_id, deactivate.proxy, deactivate
+        );
+
+        let status = match deactivate.proxy {
             ListenerType::HTTP => {
-                debug!("{} deactivate http listener {:?}", req_id, deactivate);
-                let status = match self
+                match self
                     .http
                     .borrow_mut()
                     .give_back_listener(deactivate.address)
@@ -1364,13 +1368,10 @@ impl Server {
                             deactivate.address
                         ))
                     }
-                };
-
-                push_queue(ProxyResponse::status(req_id.to_string(), status));
+                }
             }
             ListenerType::HTTPS => {
-                debug!("{} deactivate https listener {:?}", req_id, deactivate);
-                let status = match self
+                match self
                     .https
                     .borrow_mut()
                     .give_back_listener(deactivate.address)
@@ -1413,13 +1414,10 @@ impl Server {
                             deactivate.address
                         ))
                     }
-                };
-
-                push_queue(ProxyResponse::status(req_id.to_string(), status));
+                }
             }
             ListenerType::TCP => {
-                debug!("{} deactivate tcp listener {:?}", req_id, deactivate);
-                let status = match self.tcp.borrow_mut().give_back_listener(deactivate.address) {
+                match self.tcp.borrow_mut().give_back_listener(deactivate.address) {
                     Some((token, mut listener)) => {
                         if let Err(e) = self.poll.registry().deregister(&mut listener) {
                             error!(
@@ -1458,11 +1456,11 @@ impl Server {
                             deactivate.address
                         ))
                     }
-                };
-
-                push_queue(ProxyResponse::status(req_id.to_string(), status));
+                }
             }
-        }
+        };
+
+        push_queue(ProxyResponse::status(req_id.to_string(), status));
     }
 
     /// Send all socket addresses and file descriptors of all proxies, via the scm socket
